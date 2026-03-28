@@ -8,6 +8,7 @@ use crate::errors::OutboxError;
 pub enum MessageStatus {
     Pending,
     Published,
+    Processing,
     Failed,
 }
 
@@ -63,6 +64,7 @@ impl TryFrom<&str> for MessageStatus {
             "pending" => Ok(Self::Pending),
             "failed" => Ok(Self::Failed),
             "published" => Ok(Self::Published),
+            "processing" => Ok(Self::Processing),
             _ => return Err(OutboxError::Config(format!("unknown status: {s}"))),
         }
     }
@@ -73,6 +75,7 @@ impl std::fmt::Display for MessageStatus {
         match self {
             MessageStatus::Pending => write!(f, "pending"),
             MessageStatus::Published => write!(f, "published"),
+            MessageStatus::Processing => write!(f, "processing"),
             MessageStatus::Failed => write!(f, "failed"),
         }
     }

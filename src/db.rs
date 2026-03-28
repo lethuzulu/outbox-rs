@@ -1,8 +1,12 @@
+use chrono::DateTime;
 use serde_json::Value;
 use sqlx::{PgPool, Postgres, Transaction, postgres::PgPoolOptions};
 use uuid::Uuid;
 
-use crate::{errors::OutboxError, types::EventType};
+use crate::{
+    errors::OutboxError,
+    types::{EventType, MessageStatus, OutboxMessage},
+};
 
 #[derive(Debug)]
 pub struct Db {
@@ -64,5 +68,80 @@ impl Db {
         .await?
         .unwrap_or(0);
         Ok(count)
+    }
+}
+
+impl Db {
+    // claims a batch of pending rows atomically
+    pub async fn poll(
+        &self,
+        lock_secs: i64,
+        batch_size: i64,
+    ) -> Result<Vec<OutboxMessage>, OutboxError> {
+        let rows = sqlx::query!(
+                r#"
+                UPDATE outbox_messages
+                SET status = 'processing', attempts = attempts + 1, locked_until = now() + ($1 || 'seconds')::interval
+                WHERE id IN (
+                    SELECT id FROM outbox_messages
+                    WHERE status = 'pending'
+                    AND (locked_until IS NULL OR locked_until < now())
+                    ORDER BY created_at
+                    LIMIT $2
+                    FOR UPDATE SKIP LOCKED
+                )
+                RETURNING id, event_type, payload, aggregate_id, attempts
+                "#,
+                lock_secs.to_string(),
+                batch_size
+            )
+            .fetch_all(&self.pool)
+            .await?;
+
+        rows.into_iter()
+            .map(|r| {
+                Ok(OutboxMessage {
+                    id: r.id,
+                    event_type: EventType::new(r.event_type)?,
+                    payload: r.payload,
+                    aggregate_id: r.aggregate_id,
+                    status: MessageStatus::Processing,
+                    attempts: r.attempts,
+                    published_at: None,
+                    created_at: DateTime::default(),
+                })
+            })
+            .collect()
+    }
+}
+
+impl Db {
+    pub async fn mark_published(&self, id: Uuid) -> Result<(), OutboxError> {
+        sqlx::query!(
+            r#"
+            UPDATE outbox_messages
+            SET status = 'published', published_at = now(), locked_until = NULL
+            WHERE id = $1
+            "#,
+            id
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn mark_failed(&self, id: Uuid, error: &str) -> Result<(), OutboxError> {
+        sqlx::query!(
+            r#"
+            UPDATE outbox_messages
+            SET status = 'failed', last_error = $1, locked_until = NULL
+            WHERE  id = $2
+            "#,
+            error,
+            id,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 }
