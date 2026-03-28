@@ -1,2 +1,3 @@
-pub mod types;
+pub mod db;
 pub mod errors;
+pub mod types;

@@ -4,17 +4,15 @@ use uuid::Uuid;
 
 use crate::errors::OutboxError;
 
-
 #[derive(Debug)]
 pub enum MessageStatus {
     Pending,
     Published,
-    Failed
+    Failed,
 }
 
 #[derive(Debug)]
 pub struct EventType(String);
-
 
 #[derive(Debug)]
 pub struct OutboxMessage {
@@ -25,15 +23,14 @@ pub struct OutboxMessage {
     pub status: MessageStatus,
     pub attempts: i32,
     pub published_at: Option<DateTime<Utc>>,
-    pub created_at: DateTime<Utc>
+    pub created_at: DateTime<Utc>,
 }
 
-
 impl EventType {
-    pub fn new(s: impl Into<String>) -> Result<Self, OutboxError>{
+    pub fn new(s: impl Into<String>) -> Result<Self, OutboxError> {
         let s = s.into();
         if s.trim().is_empty() {
-            return Err(OutboxError::InvalidEventType)
+            return Err(OutboxError::InvalidEventType);
         }
         Ok(Self(s))
     }
@@ -53,7 +50,7 @@ impl OutboxMessage {
             status: MessageStatus::Pending,
             attempts: 0,
             published_at: None,
-            created_at: Utc::now()
+            created_at: Utc::now(),
         }
     }
 }
@@ -66,18 +63,17 @@ impl TryFrom<&str> for MessageStatus {
             "pending" => Ok(Self::Pending),
             "failed" => Ok(Self::Failed),
             "published" => Ok(Self::Published),
-            _=> return Err(OutboxError::Config(format!("unknown status: {s}")))
+            _ => return Err(OutboxError::Config(format!("unknown status: {s}"))),
         }
     }
-
 }
 
 impl std::fmt::Display for MessageStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MessageStatus::Pending    => write!(f, "pending"),
-            MessageStatus::Published  => write!(f, "published"),
-            MessageStatus::Failed     => write!(f, "failed"),
+            MessageStatus::Pending => write!(f, "pending"),
+            MessageStatus::Published => write!(f, "published"),
+            MessageStatus::Failed => write!(f, "failed"),
         }
     }
 }
