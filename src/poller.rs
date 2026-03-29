@@ -1,10 +1,14 @@
+use std::sync::Arc;
+
 use crate::{
     db::Db,
     errors::OutboxError,
-    types::{EventType, MessageStatus, OutboxMessage},
+    publisher::Publisher,
 };
-use chrono::DateTime;
-use tokio::time::Duration;
+use tokio::{
+    sync::watch,
+    time::{Duration, interval},
+};
 
 #[derive(Debug)]
 pub struct PollerConfig {
@@ -27,5 +31,40 @@ pub struct Poller {
 impl Poller {
     pub fn new(db: Db, config: PollerConfig) -> Self {
         Self { db, config }
+    }
+
+    pub async fn run(
+        &self,
+        publisher: Arc<Publisher>,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> Result<(), OutboxError> {
+        let mut ticker = interval(self.config.poll_interval);
+
+        loop {
+            tokio::select! {
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() {return Ok(());}
+                },
+                _ = ticker.tick() => {
+                    let messages = match self.db.poll(self.config.lock_secs, self.config.batch_size).await {
+                        Ok(m) => m,
+                        Err(e) => { tracing::error!(%e, "poll failed"); continue; }
+                    };
+
+                    for msg in messages {
+                        match publisher.publish(&msg).await {
+                            Ok(()) => {
+                                // only mark published after broker confirms
+                                self.db.mark_published(msg.id).await?;
+                            },
+                            Err(e) => {
+                                tracing::warn!(id = %msg.id, error = %e, "publish failed");
+                                self.db.mark_failed(msg.id, &e.to_string()).await?;
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
